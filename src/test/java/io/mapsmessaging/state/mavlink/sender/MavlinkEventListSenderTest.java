@@ -58,6 +58,52 @@ import static org.mockito.Mockito.when;
 class MavlinkEventListSenderTest {
 
   @Test
+  void transmission_snapshot_tracks_retries_and_retains_terminal_state() {
+    Fixture fixture = fixture();
+    fixture.messages.add(fixture.message(true));
+    MavlinkEventListSender sender = fixture.newSender();
+    io.mapsmessaging.state.drone.drone.DroneTwin drone =
+        new io.mapsmessaging.state.drone.drone.DroneTwin("test");
+
+    assertTrue(drone.registerMavlinkSender(sender));
+
+    try {
+      sender.start();
+
+      var first = drone.getMissionTransmission().getSnapshot();
+      assertEquals("WAITING_RESPONSE", first.state());
+      assertEquals(1L, first.sendAttempts());
+
+      sender.timeout();
+
+      var retry = drone.getMissionTransmission().getSnapshot();
+      assertEquals(1L, retry.totalPacketRetries());
+      assertEquals(2L, retry.sendAttempts());
+      assertEquals(1L, first.sendAttempts());
+
+      sender.cancel();
+
+      assertTrue(drone.removeMavlinkSender(sender));
+      assertEquals("CANCELLED", drone.getMissionTransmission().getSnapshot().state());
+      assertNull(drone.getMissionTransmission().getSnapshot().nextRetryAt());
+
+      var json =
+          io.mapsmessaging.state.StateJsonHelper.createGson()
+              .toJsonTree(drone)
+              .getAsJsonObject();
+
+      assertTrue(json.has("missionTransmission"));
+
+      var transmission = json.getAsJsonObject("missionTransmission");
+      var snapshot = transmission.getAsJsonObject("snapshot");
+
+      assertEquals(1L, snapshot.get("totalPacketRetries").getAsLong());
+    } finally {
+      sender.close();
+    }
+  }
+
+  @Test
   void constructorRejectsNullCommandSet() {
     assertThrows(NullPointerException.class, () -> new MavlinkEventListSender(null, mock(MavlinkEventSender.class), mock(MavlinkAcknowledgementHandler.class), result -> {}));
   }
