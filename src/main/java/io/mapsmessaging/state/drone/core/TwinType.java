@@ -21,9 +21,9 @@ package io.mapsmessaging.state.drone.core;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
-@Schema(description = "Type of twin (DRONE, GROUND_CONTROL, CONTACT, etc).")
+@Schema(description = "Type of twin (DRONE, CONTACT, GROUND_CONTROL, etc).")
 public enum TwinType {
   DRONE,
-  GROUND_CONTROL,
-  CONTACT
+  CONTACT,
+  GROUND_CONTROL
 }

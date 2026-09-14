@@ -31,6 +31,6 @@ public class TakPrecisionLocation {
   @Schema(description = "Altitude source.", example = "GPS")
   private String altsrc;
 
-  @Schema(description = "Geopoint (lat/lon) source.", example = "GPS")
+  @Schema(description = "Geopoint latitude/longitude source.", example = "GPS")
   private String geopointsrc;
 }

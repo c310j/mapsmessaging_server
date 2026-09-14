@@ -17,22 +17,17 @@
  *  limitations under the License.
  */
 
-package io.mapsmessaging.state.drone.tak;
+package io.mapsmessaging.network.protocol.impl.mqtt.packet;
 
-import io.mapsmessaging.state.config.CotConfigDTO;
-import lombok.Getter;
-import lombok.Setter;
+public final class MqttFrameSizeValidator {
 
-@Getter
-@Setter
-public class TakTwinContext {
-  private long lastUpdate;
-  private TakSocketConnection socketConnection;
-  private CotConfigDTO cotConfig;
+  private MqttFrameSizeValidator() {
+  }
 
-  public TakTwinContext(){
-    lastUpdate = 0;
-    socketConnection = null;
-    cotConfig = null;
+  public static void validate(long frameSize, long readBufferSize) throws MalformedException {
+    if (readBufferSize > 0 && frameSize > readBufferSize) {
+      throw new MalformedException(
+          "MQTT packet size " + frameSize + " bytes exceeds configured serverReadBufferSize of " + readBufferSize + " bytes; closing connection");
+    }
   }
 }
