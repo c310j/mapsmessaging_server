@@ -20,6 +20,7 @@
 package io.mapsmessaging.state.mavlink;
 
 import static io.mapsmessaging.state.logging.StateLogMessages.MAVLINK_STATE_TWIN_CREATED;
+import static io.mapsmessaging.state.logging.StateLogMessages.MAVLINK_TASK_COMPLETION_GATES_DISABLED;
 
 import io.mapsmessaging.dto.rest.config.protocol.impl.MavlinkKnownSourceDTO;
 import io.mapsmessaging.logging.Logger;
@@ -52,6 +53,11 @@ import lombok.NonNull;
 import org.jetbrains.annotations.NotNull;
 
 public class MavlinkTwinUpdater implements AutoCloseable {
+
+  private static final String COMPLETE_TASK_ON_ARRIVAL_TOLERANCE_ATTRIBUTE =
+      "completeTaskOnArrivalTolerance";
+  private static final String COMPLETE_TASK_ON_AUTO_TO_LOITER_ATTRIBUTE =
+      "completeTaskOnAutoToLoiter";
 
   private final Logger logger = LoggerFactory.getLogger(MavlinkTwinUpdater.class);
 
@@ -110,6 +116,7 @@ public class MavlinkTwinUpdater implements AutoCloseable {
               drone.setComponentId(env.getFrame().getComponentId());
               updateTwinResponseTopic(twinToUpdate, context.getResponseTopic());
               drone.setUniqueOutboundIdentifier(context.getUniqueOutboundIdentifier());
+              applyTaskCompletionConfiguration(drone, droneInfo);
               updateMessageFreshness(drone, packet, context);
             }
           },
@@ -178,6 +185,18 @@ public class MavlinkTwinUpdater implements AutoCloseable {
     }
   }
 
+  private void applyTaskCompletionConfiguration(
+      DroneTwin droneTwin,
+      DroneInfoDTO droneInfo
+  ) {
+    droneTwin.getAttributes().put(
+        COMPLETE_TASK_ON_ARRIVAL_TOLERANCE_ATTRIBUTE,
+        Boolean.toString(droneInfo.isCompleteTaskOnArrivalTolerance()));
+    droneTwin.getAttributes().put(
+        COMPLETE_TASK_ON_AUTO_TO_LOITER_ATTRIBUTE,
+        Boolean.toString(droneInfo.isCompleteTaskOnAutoToLoiter()));
+  }
+
   private void applyDetectionEvent(DroneTwin droneTwin, DetectionEvent event) {
     if (!isValidDetectionEvent(event)) {
       return;
@@ -231,6 +250,11 @@ public class MavlinkTwinUpdater implements AutoCloseable {
     droneTwin.setAltitudeMeters(droneInfo.getAltitudeMeters());
     droneTwin.setSurveyRadiusMeters(droneInfo.getSurveyRadiusMeters());
     droneTwin.setArrivalToleranceMeters(droneInfo.getArrivalToleranceMeters());
+    applyTaskCompletionConfiguration(droneTwin, droneInfo);
+    if (!droneInfo.isCompleteTaskOnArrivalTolerance()
+        && !droneInfo.isCompleteTaskOnAutoToLoiter()) {
+      logger.log(MAVLINK_TASK_COMPLETION_GATES_DISABLED, twinId);
+    }
     if (droneInfo.getStopAction() != null) {
       droneTwin.setStopAction(droneInfo.getStopAction());
     } else {

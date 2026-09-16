@@ -67,13 +67,31 @@ public class DroneInfoDTO {
   private Double arrivalToleranceMeters;
 
   @Schema(
+      description =
+          "When true, arrival tolerance in metres may complete a task. Disable to test "
+              + "other task-completion evidence independently.",
+      defaultValue = "true")
+  private boolean completeTaskOnArrivalTolerance = true;
+
+  @Schema(
+      description =
+          "When true, a post-dispatch MAVLink AUTO to LOITER mode transition may complete "
+              + "a non-continuous navigation task. Disabled by default.",
+      defaultValue = "false")
+  private boolean completeTaskOnAutoToLoiter = false;
+
+  @Schema(
       description = "Source used to resolve the mission altitude for vehicle-specific tasking.",
-      example = "FIXED")
+      example = "FIXED",
+      requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+      nullable = true)
   private AltitudeMode altitudeMode;
 
   @Schema(
       description = "Configured home-relative mission altitude in metres when altitudeMode is FIXED.",
-      example = "-10.0")
+      example = "-10.0",
+      requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+      nullable = true)
   private Double altitudeMeters;
 
   @Schema(description = "Drone description", type = "object", additionalProperties = Schema.AdditionalPropertiesValue.TRUE)

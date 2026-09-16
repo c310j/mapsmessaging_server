@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class MQTTConnectionTest extends MQTTBaseTest {
 
@@ -119,6 +120,26 @@ class MQTTConnectionTest extends MQTTBaseTest {
       // This is correct
       return;
     }
+    Assertions.assertTrue(client.isConnected());
+    client.disconnect();
+    Assertions.assertFalse(client.isConnected());
+    client.close();
+  }
+
+  @DisplayName("Accept MQTT connection with no credentials when anonymous access is enabled")
+  @ParameterizedTest
+  @ValueSource(ints = {MQTT_3_1, MQTT_3_1_1})
+  void testMissingCredentialsAcceptedWhenAnonymousEnabled(int version) throws MqttException, IOException {
+    MqttConnectOptions options = getOptions(false, version);
+    options.setConnectionTimeout(5);
+
+    MqttClient client = new MqttClient(
+        getUrl("tcp", true),
+        getClientId(UuidGenerator.getInstance().generate().toString(), version),
+        new MemoryPersistence());
+    client.setTimeToWait(5000);
+
+    client.connect(options);
     Assertions.assertTrue(client.isConnected());
     client.disconnect();
     Assertions.assertFalse(client.isConnected());
