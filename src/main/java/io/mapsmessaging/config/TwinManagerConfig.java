@@ -46,6 +46,22 @@ public class TwinManagerConfig extends TwinManagerConfigDTO implements Config, C
       takProtocolDTO.setPort(takProps.getIntProperty("port", takProtocolDTO.getPort()));
       takProtocolDTO.setSharedConnection(takProps.getBooleanProperty("sharedConnection", takProtocolDTO.isSharedConnection()));
       takProtocolDTO.setTopic(takProps.getProperty("topic", null));
+      if (takProps.containsKey("tls")) {
+        ConfigurationProperties tlsProps = (ConfigurationProperties) takProps.get("tls");
+        takProtocolDTO.setTlsEnabled(tlsProps.getBooleanProperty("enabled", false));
+        if (tlsProps.containsKey("keyStore")) {
+          ConfigurationProperties keyStoreProps = (ConfigurationProperties) tlsProps.get("keyStore");
+          takProtocolDTO.setKeyStoreType(keyStoreProps.getProperty("type", takProtocolDTO.getKeyStoreType()));
+          takProtocolDTO.setKeyStorePath(keyStoreProps.getProperty("path", null));
+          takProtocolDTO.setKeyStorePassword(keyStoreProps.getProperty("passphrase", null));
+        }
+        if (tlsProps.containsKey("trustStore")) {
+          ConfigurationProperties trustStoreProps = (ConfigurationProperties) tlsProps.get("trustStore");
+          takProtocolDTO.setTrustStoreType(trustStoreProps.getProperty("type", takProtocolDTO.getTrustStoreType()));
+          takProtocolDTO.setTrustStorePath(trustStoreProps.getProperty("path", null));
+          takProtocolDTO.setTrustStorePassword(trustStoreProps.getProperty("passphrase", null));
+        }
+      }
       this.tak = takProtocolDTO;
     }
     if(properties.containsKey("publish")){

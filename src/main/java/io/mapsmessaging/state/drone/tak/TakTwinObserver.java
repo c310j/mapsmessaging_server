@@ -22,6 +22,7 @@ package io.mapsmessaging.state.drone.tak;
 
 import io.mapsmessaging.config.TwinManagerConfig;
 import io.mapsmessaging.dto.rest.config.TwinManagerConfigDTO;
+import io.mapsmessaging.dto.rest.config.protocol.impl.TakProtocolDTO;
 import io.mapsmessaging.state.drone.core.EntityTwin;
 import io.mapsmessaging.state.drone.core.TwinLifecycleStatus;
 import io.mapsmessaging.state.drone.core.TwinManager;
@@ -47,6 +48,7 @@ public class TakTwinObserver implements TwinObserver {
   private final Map<String, TakTwinContext> takContexts;
   private final String takHost;
   private final int takPort;
+  private final TakProtocolDTO takConfig;
   private final TwinManager twinManager;
   private final TakEventMapper takEventMapper;
   private final TakXmlSerialiser takXmlSerialiser;
@@ -62,8 +64,9 @@ public class TakTwinObserver implements TwinObserver {
     if (config != null && config.getTak() != null) {
       this.takHost = config.getTak().getHostname();
       this.takPort = config.getTak().getPort();
+      this.takConfig = config.getTak();
       if(config.getTak().isSharedConnection() && takHost != null && !takHost.isBlank() && takPort > 0){
-        globalSocketConnection = new TakSocketConnection(takHost, takPort);
+        globalSocketConnection = createSocketConnection();
       }
       else{
         globalSocketConnection = null;
@@ -86,6 +89,7 @@ public class TakTwinObserver implements TwinObserver {
     else {
       this.takHost = null;
       this.takPort = 0;
+      this.takConfig = null;
       globalSocketConnection = null;
       eventPublisher = null;
     }
@@ -185,7 +189,7 @@ public class TakTwinObserver implements TwinObserver {
 
     if(takHost != null) {
       if (twinContext.getSocketConnection() == null) {
-        twinContext.setSocketConnection(Objects.requireNonNullElseGet(globalSocketConnection, () -> new TakSocketConnection(takHost, takPort)));
+        twinContext.setSocketConnection(Objects.requireNonNullElseGet(globalSocketConnection, this::createSocketConnection));
       }
       twinContext.getSocketConnection().accept(xml);
     }
@@ -210,5 +214,14 @@ public class TakTwinObserver implements TwinObserver {
     }
 
     twinContext.getSocketConnection().accept(takXmlSerialiser.toXml(takEvent));
+  }
+
+  private TakSocketConnection createSocketConnection() {
+    if (takConfig.isTlsEnabled()) {
+      return new TakSocketConnection(takHost, takPort,
+          takConfig.getKeyStoreType(), takConfig.getKeyStorePath(), takConfig.getKeyStorePassword(),
+          takConfig.getTrustStoreType(), takConfig.getTrustStorePath(), takConfig.getTrustStorePassword());
+    }
+    return new TakSocketConnection(takHost, takPort);
   }
 }

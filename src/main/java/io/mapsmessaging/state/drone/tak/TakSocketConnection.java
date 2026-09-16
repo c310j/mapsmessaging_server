@@ -23,13 +23,20 @@ package io.mapsmessaging.state.drone.tak;
 import lombok.Getter;
 
 import java.io.Closeable;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
 import java.util.Objects;
 import java.util.concurrent.LinkedBlockingDeque;
+
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.TrustManagerFactory;
 
 
 @Getter
@@ -46,6 +53,7 @@ public class TakSocketConnection implements Closeable {
   private final int socketTimeoutMs;
   private final boolean appendNewLine;
   private final int maxQueueSize;
+  private final SSLContext sslContext;
 
   private final LinkedBlockingDeque<String> queue;
   private final Thread writerThread;
@@ -56,7 +64,19 @@ public class TakSocketConnection implements Closeable {
   private OutputStream socketOutputStream;
 
   public TakSocketConnection(String host, int port) {
-    this(host, port, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_SOCKET_TIMEOUT_MS, true, DEFAULT_MAX_QUEUE_SIZE);
+    this(host, port, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_SOCKET_TIMEOUT_MS, true, DEFAULT_MAX_QUEUE_SIZE, null);
+  }
+
+  public TakSocketConnection(String host,
+                             int port,
+                             String keyStoreType,
+                             String keyStorePath,
+                             String keyStorePassword,
+                             String trustStoreType,
+                             String trustStorePath,
+                             String trustStorePassword) {
+    this(host, port, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_SOCKET_TIMEOUT_MS, true, DEFAULT_MAX_QUEUE_SIZE,
+        createSslContext(keyStoreType, keyStorePath, keyStorePassword, trustStoreType, trustStorePath, trustStorePassword));
   }
 
   public TakSocketConnection(String host,
@@ -65,12 +85,23 @@ public class TakSocketConnection implements Closeable {
                              int socketTimeoutMs,
                              boolean appendNewLine,
                              int maxQueueSize) {
+    this(host, port, connectTimeoutMs, socketTimeoutMs, appendNewLine, maxQueueSize, null);
+  }
+
+  private TakSocketConnection(String host,
+                              int port,
+                              int connectTimeoutMs,
+                              int socketTimeoutMs,
+                              boolean appendNewLine,
+                              int maxQueueSize,
+                              SSLContext sslContext) {
     this.host = Objects.requireNonNull(host, "host cannot be null");
     this.port = port;
     this.connectTimeoutMs = connectTimeoutMs;
     this.socketTimeoutMs = socketTimeoutMs;
     this.appendNewLine = appendNewLine;
     this.maxQueueSize = Math.max(1, maxQueueSize);
+    this.sslContext = sslContext;
     this.queue = new LinkedBlockingDeque<>(this.maxQueueSize);
     this.running = true;
     this.socket = null;
@@ -157,11 +188,15 @@ public class TakSocketConnection implements Closeable {
     closeQuietly();
 
     try {
-      Socket newSocket = new Socket();
+      Socket newSocket = sslContext == null ? new Socket() : sslContext.getSocketFactory().createSocket();
       newSocket.connect(new InetSocketAddress(host, port), connectTimeoutMs);
       newSocket.setSoTimeout(socketTimeoutMs);
       newSocket.setKeepAlive(true);
       newSocket.setTcpNoDelay(true);
+
+      if (newSocket instanceof SSLSocket sslSocket) {
+        sslSocket.startHandshake();
+      }
 
       socket = newSocket;
       socketOutputStream = newSocket.getOutputStream();
@@ -204,6 +239,36 @@ public class TakSocketConnection implements Closeable {
       catch (IOException ignored) {
       }
       socket = null;
+    }
+  }
+
+  private static SSLContext createSslContext(String keyStoreType,
+                                             String keyStorePath,
+                                             String keyStorePassword,
+                                             String trustStoreType,
+                                             String trustStorePath,
+                                             String trustStorePassword) {
+    try {
+      KeyStore keyStore = KeyStore.getInstance(keyStoreType);
+      try (FileInputStream input = new FileInputStream(keyStorePath)) {
+        keyStore.load(input, keyStorePassword.toCharArray());
+      }
+      KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+      keyManagerFactory.init(keyStore, keyStorePassword.toCharArray());
+
+      KeyStore trustStore = KeyStore.getInstance(trustStoreType);
+      try (FileInputStream input = new FileInputStream(trustStorePath)) {
+        trustStore.load(input, trustStorePassword.toCharArray());
+      }
+      TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+      trustManagerFactory.init(trustStore);
+
+      SSLContext sslContext = SSLContext.getInstance("TLS");
+      sslContext.init(keyManagerFactory.getKeyManagers(), trustManagerFactory.getTrustManagers(), null);
+      return sslContext;
+    }
+    catch (Exception exception) {
+      throw new IllegalArgumentException("Unable to load TAK TLS certificates", exception);
     }
   }
 }

@@ -63,6 +63,14 @@ public class TakProtocolDTO extends ProtocolConfigDTO {
   )
   private String topic =null;
 
+  private boolean tlsEnabled = false;
+  private String keyStoreType = "PKCS12";
+  private String keyStorePath;
+  private String keyStorePassword;
+  private String trustStoreType = "PKCS12";
+  private String trustStorePath;
+  private String trustStorePassword;
+
 
   public TakProtocolDTO() {
     super("tak");
