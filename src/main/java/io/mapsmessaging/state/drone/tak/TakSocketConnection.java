@@ -106,6 +106,7 @@ public class TakSocketConnection implements Closeable {
     synchronized (queue) {
       if (queue.remainingCapacity() == 0) {
         queue.pollFirst();
+        TakOutputStats.SOCKET_DROPPED_COUNT.increment();
       }
       queue.offerLast(xml);
     }
@@ -168,6 +169,7 @@ public class TakSocketConnection implements Closeable {
     socketOutputStream.write(t.getBytes(StandardCharsets.UTF_8));
     socketOutputStream.write('\n');
     socketOutputStream.flush();
+    TakOutputStats.recordWrite();
   }
 
   private synchronized void reconnect() {
@@ -190,10 +192,12 @@ public class TakSocketConnection implements Closeable {
 
       socket = newSocket;
       socketOutputStream = newSocket.getOutputStream();
+      TakOutputStats.CONNECT_COUNT.increment();
     }
     catch (IOException ignored) {
       socket = null;
       socketOutputStream = null;
+      TakOutputStats.CONNECT_FAILURE_COUNT.increment();
     }
   }
 
@@ -229,6 +233,7 @@ public class TakSocketConnection implements Closeable {
       catch (IOException ignored) {
       }
       socket = null;
+      TakOutputStats.DISCONNECT_COUNT.increment();
     }
   }
 }
