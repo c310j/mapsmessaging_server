@@ -347,7 +347,7 @@ public class TakTwinObserver implements TwinObserver {
     if (takEvent == null) {
       return;
     }
-    cotEventPolicy.apply(takEvent, twin, context, cotConfig);
+    TakEvent cyberIconEvent = cotEventPolicy.apply(takEvent, twin, context, cotConfig);
 
     String xml = takXmlSerialiser.toXml(takEvent);
     xml = appendStatsIfDue(twin, xml);
@@ -356,6 +356,27 @@ public class TakTwinObserver implements TwinObserver {
       TakOutputStats.recordLatencyMillis(System.currentTimeMillis() - context.getReceivedTime().toEpochMilli());
     }
 
+    boolean handedToTak = sendTwinXml(xml, twinContext);
+
+    if (cyberIconEvent != null) {
+      sendTwinXml(takXmlSerialiser.toXml(cyberIconEvent), twinContext);
+      twinContext.setCyberIconPublished(true);
+    } else if (twinContext.isCyberIconPublished()) {
+      TakEvent cyberIconRemoval = cotEventPolicy.buildCyberIconRemoval(takEvent);
+      if (cyberIconRemoval != null) {
+        sendTwinXml(takXmlSerialiser.toXml(cyberIconRemoval), twinContext);
+      }
+      twinContext.setCyberIconPublished(false);
+    }
+
+    if (handedToTak) {
+      pictureRecoveryTracker.onCotHandedToTak(
+          twin.getTwinId(), MtiStatusRegistry.snapshot(twin.getTwinId()) != null);
+    }
+  }
+
+  /** @return true if the xml was handed to at least one TAK server or the CoT topic. */
+  private boolean sendTwinXml(String xml, TakTwinContext twinContext) {
     boolean handedToTak = false;
     if (takHost != null && !takHost.isBlank() && takPort > 0) {
       if (twinContext.getSocketConnection() == null) {
@@ -381,11 +402,7 @@ public class TakTwinObserver implements TwinObserver {
         exception.printStackTrace();
       }
     }
-
-    if (handedToTak) {
-      pictureRecoveryTracker.onCotHandedToTak(
-          twin.getTwinId(), MtiStatusRegistry.snapshot(twin.getTwinId()) != null);
-    }
+    return handedToTak;
   }
 
   private static Instant receivedTime(TwinUpdateContext context) {
@@ -436,6 +453,18 @@ public class TakTwinObserver implements TwinObserver {
       twinContext.getSocketConnection().accept(xml);
     }
     additionalTakServers.accept(xml);
+
+    if (twinContext.isCyberIconPublished()) {
+      TakEvent cyberIconRemoval = cotEventPolicy.buildCyberIconRemoval(takEvent);
+      if (cyberIconRemoval != null) {
+        String removalXml = takXmlSerialiser.toXml(cyberIconRemoval);
+        if (twinContext.getSocketConnection() != null) {
+          twinContext.getSocketConnection().accept(removalXml);
+        }
+        additionalTakServers.accept(removalXml);
+      }
+      twinContext.setCyberIconPublished(false);
+    }
   }
 
   private CotConfigDTO resolveCotConfig(TwinUpdateContext context, TakTwinContext twinContext) {
