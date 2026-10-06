@@ -29,6 +29,7 @@ import io.mapsmessaging.state.drone.tak.model.TakVideo;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import io.mapsmessaging.state.drone.core.EntityTwin;
+import io.mapsmessaging.state.drone.core.PositionOutputRegistry;
 import io.mapsmessaging.state.drone.core.TwinRelationship;
 import io.mapsmessaging.state.drone.core.TwinType;
 import io.mapsmessaging.state.drone.core.TwinUpdateContext;
@@ -68,7 +69,7 @@ public class TakEventMapper {
     Instant eventTime = resolveEventTime(twin, context);
     Instant staleTime = eventTime.plus(resolveStaleSeconds(twin), ChronoUnit.SECONDS);
 
-    GeoPosition geoPosition = twin.getGeoPosition();
+    GeoPosition geoPosition = PositionOutputRegistry.apply(twin.getTwinId(), twin.getGeoPosition());
     FixInfo fixInfo = twin.getFixInfo();
     VelocityVector velocityVector = twin.getVelocityVector();
     Orientation orientation = twin.getOrientation();

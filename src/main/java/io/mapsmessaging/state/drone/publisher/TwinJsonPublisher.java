@@ -31,6 +31,7 @@ import io.mapsmessaging.logging.Logger;
 import io.mapsmessaging.logging.LoggerFactory;
 import io.mapsmessaging.state.StateJsonHelper;
 import io.mapsmessaging.state.drone.core.EntityTwin;
+import io.mapsmessaging.state.drone.core.PositionOutputRegistry;
 import io.mapsmessaging.state.drone.core.TwinManager;
 import io.mapsmessaging.state.drone.core.TwinObserver;
 import io.mapsmessaging.state.drone.core.TwinUpdateContext;
@@ -182,11 +183,23 @@ public class TwinJsonPublisher implements TwinObserver, ClientConnection, Messag
   private TwinJsonPayload generateTwinJsonPayload(String twinId, EntityTwin twin) {
     try {
       JsonObject jsonObject = gson.toJsonTree(twin).getAsJsonObject();
+      applyReportedPosition(twin, jsonObject);
       return new TwinJsonPayload(jsonObject, gson.toJson(jsonObject));
     } catch (Throwable e) {
       logger.log(TWIN_JSON_SERIALISATION_FAILED, twinId, twin.getClass().getName(), e.getMessage());
       return null;
     }
+  }
+
+  /** Output only: the twin keeps its own position and geohash, only the published JSON changes. */
+  private void applyReportedPosition(EntityTwin twin, JsonObject jsonObject) {
+    GeoPosition position = twin.getGeoPosition();
+    GeoPosition reported = PositionOutputRegistry.apply(twin.getTwinId(), position);
+    if (reported == position || reported.getLatitude() == null || reported.getLongitude() == null) {
+      return;
+    }
+    jsonObject.add("geoPosition", gson.toJsonTree(reported));
+    jsonObject.addProperty("geoHash", GeoHashUtils.toGeoHash(reported.getLatitude(), reported.getLongitude(), 12));
   }
 
   private void storeTwinMessage(Destination destination, String json) throws IOException {
