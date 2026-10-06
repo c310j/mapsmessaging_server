@@ -23,6 +23,7 @@ import io.mapsmessaging.state.config.CotAffiliation;
 import io.mapsmessaging.state.config.CotConfigDTO;
 import io.mapsmessaging.state.config.VehicleClass;
 import io.mapsmessaging.state.drone.core.EntityTwin;
+import io.mapsmessaging.state.drone.core.PositionOutputRegistry;
 import io.mapsmessaging.state.drone.core.TwinType;
 import io.mapsmessaging.state.drone.core.TwinUpdateContext;
 import io.mapsmessaging.state.drone.drone.DroneTwin;
@@ -487,7 +488,7 @@ final class CotEventPolicy {
   private void ensureRemovalPoint(TakEvent event, EntityTwin twin, CotConfigDTO config) {
     TakPoint point = event.getPoint();
     if (point == null) {
-      GeoPosition geoPosition = twin.getGeoPosition();
+      GeoPosition geoPosition = PositionOutputRegistry.apply(twin.getTwinId(), twin.getGeoPosition());
       if (geoPosition == null) {
         return;
       }
