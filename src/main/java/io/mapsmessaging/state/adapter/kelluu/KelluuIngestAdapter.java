@@ -43,6 +43,7 @@ import java.security.Principal;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.atomic.LongAdder;
 
 /**
@@ -50,6 +51,11 @@ import java.util.concurrent.atomic.LongAdder;
  * and registers or updates one twin per airship and per detected target via
  * {@link KelluuMessageMapper}. From there the existing twin pipeline takes over: TAK output, KPIs
  * and STANAG node state. Subscribes through MAPS' internal session API, like the CoT ingest adapter.
+ *
+ * <p>{@link #sendMessage} runs on the engine's message-delivery thread and only queues the payload.
+ * A dedicated worker thread updates the twins: a twin update stores messages on other destinations
+ * and waits for them, and doing that on the delivery thread stalled the whole engine on central
+ * (2026-10-07, the same task-pool deadlock {@code EventPublisher} avoids the same way).
  */
 public class KelluuIngestAdapter implements StateMessageAdapter, ClientConnection, MessageListener {
 
@@ -57,15 +63,25 @@ public class KelluuIngestAdapter implements StateMessageAdapter, ClientConnectio
   /** Feed name prefix in {@link FeedActivityRegistry}: one feed per Kelluu platform. */
   public static final String FEED_PREFIX = "kelluu:";
 
+  static final int MAX_QUEUE_SIZE = 1000;
+  private static final long DROP_LOG_INTERVAL = 1000;
+
   private final Logger logger = LoggerFactory.getLogger(KelluuIngestAdapter.class);
   private final KelluuMessageMapper mapper = new KelluuMessageMapper();
   private final String topic;
   private final TwinManager twinManager;
+  private final LinkedBlockingDeque<PendingMessage> queue = new LinkedBlockingDeque<>(MAX_QUEUE_SIZE);
 
   private final LongAdder routedCount = new LongAdder();
   private final LongAdder droppedCount = new LongAdder();
+  private final LongAdder queueFullCount = new LongAdder();
 
   private Session session;
+  private Thread worker;
+  private volatile boolean running;
+
+  private record PendingMessage(String destinationName, byte[] payload) {
+  }
 
   public KelluuIngestAdapter(String topic, TwinManager twinManager) {
     this.topic = topic;
@@ -79,6 +95,7 @@ public class KelluuIngestAdapter implements StateMessageAdapter, ClientConnectio
 
   @Override
   public void start() {
+    startWorker();
     try {
       SessionContextBuilder sessionContextBuilder = new SessionContextBuilder(sessionId(), this);
       sessionContextBuilder.setUsername("anonymous")
@@ -103,6 +120,43 @@ public class KelluuIngestAdapter implements StateMessageAdapter, ClientConnectio
   @Override
   public void stop() {
     closeSessionQuietly();
+    stopWorker();
+  }
+
+  synchronized void startWorker() {
+    if (worker != null) {
+      return;
+    }
+    running = true;
+    worker = new Thread(this::workerLoop, "kelluu-ingest-worker");
+    worker.setDaemon(true);
+    worker.start();
+  }
+
+  synchronized void stopWorker() {
+    running = false;
+    if (worker != null) {
+      worker.interrupt();
+      worker = null;
+    }
+  }
+
+  private void workerLoop() {
+    while (running) {
+      PendingMessage pending;
+      try {
+        pending = queue.takeFirst();
+      } catch (InterruptedException interruptedException) {
+        Thread.currentThread().interrupt();
+        return;
+      }
+      try {
+        handle(pending.destinationName(), pending.payload());
+      } catch (Exception e) {
+        droppedCount.increment();
+        logger.warn("Kelluu ingest adapter failed to process an incoming message, dropped", e);
+      }
+    }
   }
 
   private void closeSessionQuietly() {
@@ -117,16 +171,35 @@ public class KelluuIngestAdapter implements StateMessageAdapter, ClientConnectio
     }
   }
 
+  /** Runs on the engine's delivery thread: queue the payload and return, never touch twins here. */
   @Override
   public void sendMessage(@NotNull MessageEvent messageEvent) {
     try {
-      handle(messageEvent.getDestinationName(), messageEvent.getMessage().getOpaqueData());
-    } catch (Exception e) {
-      droppedCount.increment();
-      logger.warn("Kelluu ingest adapter failed to process an incoming message, dropped", e);
+      enqueue(messageEvent.getDestinationName(), messageEvent.getMessage().getOpaqueData());
     } finally {
       if (messageEvent.getCompletionTask() != null) {
         messageEvent.getCompletionTask().run();
+      }
+    }
+  }
+
+  /** Queues a message for the worker without blocking; when the queue is full the oldest is dropped. */
+  void enqueue(String destinationName, byte[] payload) {
+    PendingMessage pending = new PendingMessage(destinationName, payload == null ? null : payload.clone());
+    boolean dropped = false;
+    synchronized (queue) {
+      if (queue.remainingCapacity() == 0) {
+        queue.pollFirst();
+        dropped = true;
+      }
+      queue.offerLast(pending);
+    }
+    if (dropped) {
+      queueFullCount.increment();
+      long total = queueFullCount.sum();
+      // Rate-limited: a stalled twin pipeline at feed rate would otherwise flood the log.
+      if (total == 1 || total % DROP_LOG_INTERVAL == 0) {
+        logger.warn("Kelluu ingest queue full ({} messages), dropped the oldest; {} dropped so far", MAX_QUEUE_SIZE, total);
       }
     }
   }
@@ -189,6 +262,14 @@ public class KelluuIngestAdapter implements StateMessageAdapter, ClientConnectio
 
   public long getDroppedCount() {
     return droppedCount.sum();
+  }
+
+  public long getQueueFullDropCount() {
+    return queueFullCount.sum();
+  }
+
+  int getQueueSize() {
+    return queue.size();
   }
 
   // --- ClientConnection: no network endpoint of its own, it rides an internal session. ---

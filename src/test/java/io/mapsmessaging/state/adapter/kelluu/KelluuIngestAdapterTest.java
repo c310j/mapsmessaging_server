@@ -21,6 +21,7 @@ package io.mapsmessaging.state.adapter.kelluu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -33,6 +34,9 @@ import io.mapsmessaging.state.drone.core.TwinUpdateContext;
 import io.mapsmessaging.state.drone.drone.DroneTwin;
 import io.mapsmessaging.state.drone.tak.CotToTwinMapper;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -152,6 +156,88 @@ class KelluuIngestAdapterTest {
     adapter.handle("/feed/kelluu/positions", bytes(POSITION.replace("\"MSL\"", "\"HAE\"")));
 
     assertNull(twinManager.getTwin("asu16-Raptor").orElseThrow().getGeoPosition().getAltitudeMslMeters());
+  }
+
+  @Test
+  void enqueue_returnsAtOnce_whileTheTwinPipelineIsBlocked() throws Exception {
+    // Regression for the 2026-10-07 central stall: the delivery thread must never wait for twin updates.
+    TwinManager twinManager = new TwinManager();
+    CountDownLatch insideObserver = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    CountDownLatch updated = new CountDownLatch(1);
+    twinManager.addObserver(new TwinObserver() {
+      @Override
+      public void onTwinAdded(EntityTwin twin, TwinUpdateContext context) {
+        insideObserver.countDown();
+        awaitQuietly(release);
+      }
+
+      @Override
+      public void onTwinUpdated(String twinId, EntityTwin current, TwinUpdateContext context) {
+        updated.countDown();
+      }
+    });
+    KelluuIngestAdapter adapter = new KelluuIngestAdapter(KelluuIngestAdapterFactory.DEFAULT_TOPIC, twinManager);
+    adapter.startWorker();
+    try {
+      adapter.enqueue("/feed/kelluu/positions", bytes(POSITION));
+      assertTrue(insideObserver.await(5, TimeUnit.SECONDS), "worker should be blocked inside the twin pipeline");
+
+      assertTimeoutPreemptively(Duration.ofSeconds(1),
+          () -> adapter.enqueue("/feed/kelluu/positions", bytes(POSITION.replace("44.65620067187408", "44.7"))));
+      assertEquals(1, adapter.getQueueSize());
+
+      release.countDown();
+      assertTrue(updated.await(5, TimeUnit.SECONDS), "queued message should be processed once the pipeline frees up");
+      assertEquals(44.7, twinManager.getTwin("asu16-Raptor").orElseThrow().getGeoPosition().getLatitude(), 1e-12);
+    } finally {
+      release.countDown();
+      adapter.stopWorker();
+    }
+  }
+
+  @Test
+  void enqueue_whenQueueIsFull_dropsTheOldestMessage() {
+    KelluuIngestAdapter adapter = new KelluuIngestAdapter(KelluuIngestAdapterFactory.DEFAULT_TOPIC, new TwinManager());
+
+    for (int index = 0; index <= KelluuIngestAdapter.MAX_QUEUE_SIZE; index++) {
+      adapter.enqueue("/feed/kelluu/positions", bytes(POSITION));
+    }
+
+    assertEquals(KelluuIngestAdapter.MAX_QUEUE_SIZE, adapter.getQueueSize());
+    assertEquals(1, adapter.getQueueFullDropCount());
+  }
+
+  @Test
+  void enqueue_copiesThePayload() throws Exception {
+    TwinManager twinManager = new TwinManager();
+    CountDownLatch added = new CountDownLatch(1);
+    twinManager.addObserver(new TwinObserver() {
+      @Override
+      public void onTwinAdded(EntityTwin twin, TwinUpdateContext context) {
+        added.countDown();
+      }
+    });
+    KelluuIngestAdapter adapter = new KelluuIngestAdapter(KelluuIngestAdapterFactory.DEFAULT_TOPIC, twinManager);
+    byte[] payload = bytes(POSITION);
+
+    adapter.enqueue("/feed/kelluu/positions", payload);
+    java.util.Arrays.fill(payload, (byte) ' ');
+    adapter.startWorker();
+    try {
+      assertTrue(added.await(5, TimeUnit.SECONDS));
+      assertTrue(twinManager.getTwin("asu16-Raptor").isPresent());
+    } finally {
+      adapter.stopWorker();
+    }
+  }
+
+  private static void awaitQuietly(CountDownLatch latch) {
+    try {
+      latch.await(10, TimeUnit.SECONDS);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
   }
 
   @Test
